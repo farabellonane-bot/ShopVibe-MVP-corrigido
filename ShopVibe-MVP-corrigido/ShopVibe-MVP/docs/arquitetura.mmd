@@ -1,0 +1,10 @@
+flowchart TB
+  APP["App / Simulador de pedidos"] --> PG[("PostgreSQL 16<br/>orders")]
+  PG -->|"WAL lógico / CDC"| DEB["Kafka Connect + Debezium"]
+  DEB --> TOPIC[["Kafka KRaft<br/>shopvibe.public.orders<br/>retenção: 7 dias"]]
+  TOPIC --> WORKER["Worker Python<br/>Consumer Group shopvibe-cg"]
+  WORKER --> RAW[("MongoDB<br/>raw_events (camada bronze)<br/>orders_current")]
+  WORKER --> REDIS[("Redis<br/>contadores + janela 120 s")]
+  RAW --> API["FastAPI"]
+  REDIS --> API
+  API --> USER["Diretoria / Antifraude"]
