@@ -109,25 +109,6 @@ Para apagar também os dados persistidos (**irreversível**; não use antes de e
 docker compose down -v
 ```
 
-## Arquitetura e correções importantes
-
-1. **CDC real:** Debezium lê o WAL lógico do PostgreSQL; não há polling de tabela nem publicação manual no produtor.
-2. **Eventos brutos (camada bronze):** a coleção `raw_events` do MongoDB guarda o envelope CDC e metadados de tópico/partição/offset. O identificador de evento impede gravar o mesmo offset duas vezes.
-3. **Idempotência:** o worker grava o evento bruto e a visão atual do pedido com upsert e usa uma chave de evento Redis antes de incrementar os contadores. O commit do offset Kafka só ocorre depois do processamento.
-4. **Métricas:** Redis mantém contagem e soma de eventos de criação do dia. O snapshot inicial serve para popular a visão dos pedidos, sem incrementar as métricas.
-5. **Janela de fraude:** Sorted Set do Redis mantém os timestamps de pedidos por cliente e remove itens anteriores a 120 segundos.
-6. **API:** FastAPI expõe vendas do dia, pedido por ID, alertas, health check e uma rota auxiliar para demonstrar eventos brutos.
-7. **Limitação de garantia:** MongoDB, Redis e offsets Kafka não participam de uma transação distribuída. A idempotência reduz duplicações em reinícios, mas uma falha entre escrita no MongoDB e marcação da chave Redis ainda exige reconciliação para garantias fortes. Para produção, considerar inbox/outbox transacional, processamento idempotente com estado durável e testes de recuperação.
-8. **Escala:** um broker Kafka e fator de replicação 1 são suficientes para laboratório, não para tolerância à perda de nó. Para produção seriam necessários múltiplos brokers, replicação, monitoramento, autenticação, segredos e políticas de retenção adequadas.
-9. **Regra de fraude:** a demonstração gera alerta quando o cliente supera cinco pedidos dentro de 120 segundos. Para não disparar alertas repetidos por eventos duplicados, o alerta é identificado pelo cliente e pelo pedido que cruzou o limite.
-
-## Requisitos cobertos
-
-**Obrigatórios do trabalho**
-
-- RF01: capturar cada pedido novo por CDC e disponibilizá-lo em um tópico do Kafka em poucos segundos.
-- RF02: armazenar os eventos brutos para reprocessamento (camada bronze, coleção `raw_events`).
-
 */# Licenças
 
 O código deste repositório usa a licença MIT (arquivo `LICENSE`). Kafka, Kafka Connect, Debezium, PostgreSQL, Python e FastAPI têm licenças open source. O MongoDB Community (SSPL) e o Redis 7.4 (RSALv2/SSPLv1) são gratuitos, 
