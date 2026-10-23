@@ -2,7 +2,6 @@
 
 Projeto didático para demonstrar o caminho **PostgreSQL → Debezium/Kafka Connect → Kafka → Worker Python → MongoDB/Redis → FastAPI**.
 
-O caso de uso é a ShopVibe, um e-commerce fictício que perde vendas por não enxergar a loja em tempo real. O foco obrigatório é a **captura e ingestão dos pedidos**: cada pedido novo chega ao Kafka em segundos (RF01) e os eventos brutos ficam guardados na **camada bronze** (RF02). Veja o desenho em [`docs/desenho-solucao.png`](docs/desenho-solucao.png) e as decisões em [`docs/adrs/`](docs/adrs/).
 
 > Este é um MVP local de demonstração. Um único broker Kafka com fator de replicação 1 não oferece alta disponibilidade contra perda do broker. Não use as senhas deste ambiente em produção.
 
@@ -14,9 +13,7 @@ O caso de uso é a ShopVibe, um e-commerce fictício que perde vendas por não e
 
 ## 1. Subir a infraestrutura
 
-**Atalho no Windows (recomendado):** na pasta do projeto, rode `.\start.ps1`. Ele sobe tudo, espera o conector Debezium ficar `RUNNING`, confere o tópico e confirma que os eventos chegam ao MongoDB. Opções: `-Limpo` (apaga volumes e recomeça do zero) e `-SemSimulador` (deixa o simulador parado, útil para gravar a demonstração).
-
-Ou, manualmente: abra o terminal (PowerShell no Windows, ou Bash) na pasta que contém `docker-compose.yml` e execute. Os comandos abaixo funcionam nos dois, exceto onde houver indicação:
+Abra o terminal (PowerShell no Windows, ou Bash) na pasta que contém `docker-compose.yml` e execute. Os comandos abaixo funcionam nos dois, exceto onde houver indicação:
 
 ```bash
 docker compose up -d --build
@@ -33,26 +30,26 @@ docker compose logs --tail=100 connector-init
 docker compose logs --tail=100 worker
 ```
 
-A ordem de inicialização é garantida pelo `docker-compose.yml`: o serviço `kafka-init` cria o tópico `shopvibe.public.orders`; o `connector-init` registra o conector PostgreSQL no Kafka Connect e só termina quando ele está `RUNNING`; depois sobem `worker` e `simulator`. Para conferir o status:
+O serviço `connector-init` registra o conector PostgreSQL no Kafka Connect. Para conferir o status:
 
 - `http://localhost:8083/connectors`
 - `http://localhost:8083/connectors/shopvibe-postgres-connector/status`
 
 O tópico esperado é `shopvibe.public.orders`.
 
-## 2. Pedidos de demonstração
+## 2. Criar pedidos de demonstração
 
-O simulador sobe junto com o ambiente e cria um pedido a cada dois segundos (ajustável pela variável `SIM_INTERVALO_SEGUNDOS`). O cliente `999` é repetido de propósito para disparar o alerta de fraude; os demais clientes ficam abaixo do limite. Para acompanhar:
+Em outro terminal:
 
 ```bash
+docker compose --profile demo up -d simulator
 docker compose logs -f simulator
 ```
 
-Para parar apenas o simulador (e religar depois):
+O simulador cria um pedido a cada dois segundos. Para parar apenas o simulador:
 
 ```bash
 docker compose stop simulator
-docker compose start simulator
 ```
 
 Também é possível inserir um pedido manualmente, em uma linha só (sem entrar no `psql`):
@@ -112,17 +109,6 @@ Para apagar também os dados persistidos (**irreversível**; não use antes de e
 docker compose down -v
 ```
 
-## Solução de problemas
-
-| Sintoma | Causa e solução |
-|---|---|
-| `Subscribed topic not available: shopvibe.public.orders` no worker | O tópico ainda não existia. Agora é criado pelo `kafka-init` e o worker aguarda sozinho; se aparecer uma vez no início, é inofensivo. |
-| `network ... not found` ao subir um container | Container antigo apontando para uma rede removida. Rode `docker compose down --remove-orphans` e depois `docker compose up -d`, ou use `.\start.ps1`. |
-| `connector-init` termina com erro | Veja `docker compose logs connector-init`. O script tenta o registro 20 vezes e falha com o status do conector. |
-| Contagem do Mongo não sobe | `docker compose logs --tail=50 worker` e `curl http://localhost:8083/connectors/shopvibe-postgres-connector/status`. |
-| Dados estranhos depois de apagar só alguns volumes | Postgres e Kafka precisam ser apagados juntos (slot e offsets do Debezium ficam em ambos). Use `docker compose down -v`. |
-| Avisos `FATAL: database "shopvibe" does not exist`, `NOT_COORDINATOR`, `already mapped` | Ruído da inicialização; pode ignorar. |
-
 ## Arquitetura e correções importantes
 
 1. **CDC real:** Debezium lê o WAL lógico do PostgreSQL; não há polling de tabela nem publicação manual no produtor.
@@ -142,23 +128,6 @@ docker compose down -v
 - RF01: capturar cada pedido novo por CDC e disponibilizá-lo em um tópico do Kafka em poucos segundos.
 - RF02: armazenar os eventos brutos para reprocessamento (camada bronze, coleção `raw_events`).
 
-**Diferenciais implementados** (além do obrigatório)
+*/# Licenças
 
-- Contagem e soma de pedidos do dia no Redis.
-- Consulta de métricas e pedidos pela API REST (FastAPI).
-- Alerta de fraude para cliente com mais de cinco pedidos em 120 segundos.
-
-## Não confundir demonstração com produção
-
-O ambiente valida o fluxo funcional e facilita uma apresentação reproduzível. A meta de 300 mil pedidos/dia e disponibilidade sem perda precisa de teste de carga, monitoramento e configuração de alta disponibilidade; não é comprovada apenas por iniciar os contêineres.
-
-## Documentação da entrega
-
-- [`docs/adrs/`](docs/adrs/): seis registros de decisão (Kafka, CDC com Debezium, camada bronze, Redis e FastAPI, durabilidade e escalabilidade, custo e licenças).
-- [`docs/desenho-solucao.png`](docs/desenho-solucao.png) e [`.pdf`](docs/desenho-solucao.pdf): desenho da solução, com o que foi implementado e o que fica como evolução.
-- [`docs/roteiro-demonstracao.md`](docs/roteiro-demonstracao.md): roteiro do vídeo de até 5 minutos.
-- [`docs/comandos.md`](docs/comandos.md): lista dos comandos usados para reproduzir a demonstração.
-
-## Licenças
-
-O código deste repositório usa a licença MIT (arquivo `LICENSE`). Kafka, Kafka Connect, Debezium, PostgreSQL, Python e FastAPI têm licenças open source. O MongoDB Community (SSPL) e o Redis 7.4 (RSALv2/SSPLv1) são gratuitos, mas **não são open source segundo a OSI**; essa ressalva e o plano de saída estão no [ADR-006](docs/adrs/ADR-006-custo-e-licencas.md).
+O código deste repositório usa a licença MIT (arquivo `LICENSE`). Kafka, Kafka Connect, Debezium, PostgreSQL, Python e FastAPI têm licenças open source. O MongoDB Community (SSPL) e o Redis 7.4 (RSALv2/SSPLv1) são gratuitos, 
